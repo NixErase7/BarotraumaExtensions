@@ -30,7 +30,7 @@ namespace Barotrauma
 
     partial class Character : Entity, IDamageable, ISerializableEntity, IClientSerializable, IServerPositionSync
     {
-        public readonly static List<Character> CharacterList = new List<Character>();
+        public static readonly List<Character> CharacterList = new List<Character>();
 
         public const float MaxHighlightDistance = 150.0f;
         public const float MaxDragDistance = 200.0f;
@@ -39,7 +39,13 @@ namespace Barotrauma
 
         partial void UpdateLimbLightSource(Limb limb);
 
-        private bool enabled = true;
+        private bool initialized;
+        private bool enabled;
+        //characters start disabled in the multiplayer mode, and are enabled if/when
+        //  - controlled by the player
+        //  - client receives a position update from the server
+        //  - server receives an input message from the client controlling the character
+        //  - if an AICharacter, the server enables it when close enough to any of the players
         public bool Enabled
         {
             get
@@ -48,7 +54,12 @@ namespace Barotrauma
             }
             set
             {
-                if (value == enabled) { return; }
+                if (initialized && value == enabled)
+                {
+                    // Ensure that we'll set the value and run the code below at least once, because otherwise the states might be out of sync.
+                    return;
+                }
+                initialized = true;
 
                 if (Removed)
                 {
@@ -80,7 +91,6 @@ namespace Barotrauma
                         //we only want to enable the physics body if it's an actual holdable item, not e.g. a wearable item like handcuffs
                         item.body.Enabled = true;
                     }
-
                 }
                 AnimController.Collider.Enabled = value;
             }
@@ -108,6 +118,13 @@ namespace Barotrauma
                 {
                     if (!CharacterList.Contains(this)) { CharacterList.Add(this); }
                     if (AiTarget != null && !AITarget.List.Contains(AiTarget)) { AITarget.List.Add(AiTarget); }
+                }
+                if (Inventory != null)
+                {
+                    foreach (var item in Inventory.FindAllItems(recursive: true))
+                    {
+                        item.IsActive = !disabledByEvent;
+                    }
                 }
             }
         }
@@ -607,9 +624,9 @@ namespace Barotrauma
         {
             get
             {
-                if (IsPet)
+                if (IsPet && AIController is EnemyAIController { PetBehavior: { } petBehavior })
                 {
-                    string petName = (AIController as EnemyAIController).PetBehavior.GetTagName();
+                    string petName = petBehavior.GetTagName();
                     if (!string.IsNullOrEmpty(petName)) { return petName; }
                 }
 
@@ -1619,18 +1636,14 @@ namespace Barotrauma
                 PressureProtection = int.MaxValue;
             }
 
-            AnimController.SetPosition(ConvertUnits.ToSimUnits(position));
+            CharacterHealth.CheckForErrors();
 
-            AnimController.FindHull(null);
+            AnimController.SetPosition(ConvertUnits.ToSimUnits(position));
+            AnimController.FindHull(setInWater: true);
             if (AnimController.CurrentHull != null) { Submarine = AnimController.CurrentHull.Submarine; }
 
             CharacterList.Add(this);
-
-            //characters start disabled in the multiplayer mode, and are enabled if/when
-            //  - controlled by the player
-            //  - client receives a position update from the server
-            //  - server receives an input message from the client controlling the character
-            //  - if an AICharacter, the server enables it when close enough to any of the players
+            
             Enabled = GameMain.NetworkMember == null;
 
             if (info != null)
@@ -2411,7 +2424,9 @@ namespace Barotrauma
 
             if (Inventory != null)
             {
-                if (IsKeyHit(InputType.DropItem) && Screen.Selected is { IsEditor: false })
+                //this doesn't need to be run by the server, clients sync the contents of their inventory with the server instead of the inputs used to manipulate the inventory
+#if CLIENT
+                if (IsKeyHit(InputType.DropItem) && Screen.Selected is { IsEditor: false } && CharacterHUD.ShouldDrawInventory(this))
                 {
                     foreach (Item item in HeldItems)
                     {
@@ -2429,6 +2444,7 @@ namespace Barotrauma
                         break;
                     }
                 }
+#endif
 
                 bool CanUseItemsWhenSelected(Item item) => item == null || !item.Prefab.DisableItemUsageWhenSelected;
                 if (CanUseItemsWhenSelected(SelectedItem) && CanUseItemsWhenSelected(SelectedSecondaryItem))
@@ -2632,6 +2648,7 @@ namespace Barotrauma
         public bool Unequip(Item item)
         {
             if (!HasEquippedItem(item)) { return false; }
+            if (!item.IsInteractable(this)) { return false; }
             if (!TryPutItemInAnySlot(item))
             {
                 if (!TryPutItemInBag(item))
@@ -2642,7 +2659,7 @@ namespace Barotrauma
             return true;
         }
 
-        public bool CanAccessInventory(Inventory inventory, CharacterInventory.AccessLevel accessLevel = CharacterInventory.AccessLevel.Limited)
+        public bool CanAccessInventory(Inventory inventory, CharacterInventory.AccessLevel accessLevel = CharacterInventory.AccessLevel.AllowBotsAndPets)
         {
             if (!CanInteract || inventory.Locked) { return false; }
             
@@ -2686,7 +2703,7 @@ namespace Barotrauma
         /// <summary>
         /// Is the inventory accessible to the character? Doesn't check if the character can actually interact with it (distance checks etc).
         /// </summary>
-        public bool IsInventoryAccessibleTo(Character character, CharacterInventory.AccessLevel accessLevel = CharacterInventory.AccessLevel.Limited)
+        public bool IsInventoryAccessibleTo(Character character, CharacterInventory.AccessLevel accessLevel = CharacterInventory.AccessLevel.AllowBotsAndPets)
         {
             if (Removed || Inventory == null) { return false; }
             if (!Inventory.AccessibleWhenAlive && !IsDead)
@@ -2701,9 +2718,9 @@ namespace Barotrauma
             if (IsKnockedDownOrRagdolled || LockHands) { return true; }
             return accessLevel switch
             {
-                CharacterInventory.AccessLevel.Restricted => false,
-                CharacterInventory.AccessLevel.Limited => (IsBot && IsOnSameTeam()) || IsFriendlyPet(),
-                CharacterInventory.AccessLevel.Allowed => IsOnSameTeam() || IsFriendlyPet(),
+                CharacterInventory.AccessLevel.OnlyIfIncapacitated => false,
+                CharacterInventory.AccessLevel.AllowBotsAndPets => (IsBot && IsOnSameTeam()) || IsFriendlyPet(),
+                CharacterInventory.AccessLevel.AllowFriendly => IsOnSameTeam() || IsFriendlyPet(),
                 _ => throw new NotImplementedException()
             };
             
@@ -3300,17 +3317,22 @@ namespace Barotrauma
 
         public static void UpdateAll(float deltaTime, Camera cam)
         {
-            if (GameMain.NetworkMember == null || !GameMain.NetworkMember.IsClient)
+            if (GameMain.NetworkMember == null || !GameMain.NetworkMember.IsClient) // single player or server
             {
                 foreach (Character c in CharacterList)
                 {
-                    if (c is not AICharacter && !c.IsRemotePlayer) { continue; }
-
-                    if (c.IsPlayer || (c.IsBot && !c.IsDead))
+                    // TODO: The logic below seems to be overly complicated and quite confusing
+                    if (c is not AICharacter && !c.IsRemotePlayer) { continue; } // confusing -> what this line is intended for? local player? But that's handled below...
+                    if (c.IsRemotePlayer)
+                    {
+                        // Let the client tell when to enable the character. If we force it enabled here, it may e.g. get killed while still loading a round.
+                        continue;
+                    }
+                    if (c.IsLocalPlayer || (c.IsBot && !c.IsDead))
                     {
                         c.Enabled = true;
                     }
-                    else if (GameMain.NetworkMember != null && GameMain.NetworkMember.IsServer)
+                    else if (GameMain.NetworkMember != null && GameMain.NetworkMember.IsServer) // mp server
                     {
                         //disable AI characters that are far away from all clients and the host's character and not controlled by anyone
                         float closestPlayerDist = c.GetDistanceToClosestPlayer();
@@ -3327,7 +3349,7 @@ namespace Barotrauma
                             c.Enabled = true;
                         }
                     }
-                    else if (Submarine.MainSub != null)
+                    else if (Submarine.MainSub != null) // sp only?
                     {
                         //disable AI characters that are far away from the sub and the controlled character
                         float distSqr = Vector2.DistanceSquared(Submarine.MainSub.WorldPosition, c.WorldPosition);
@@ -3356,10 +3378,9 @@ namespace Barotrauma
                 }
             }
 
-            for (int i = 0; i < CharacterList.Count; i++)
+            foreach (Character character in CharacterList)
             {
-                var character = CharacterList[i];
-                System.Diagnostics.Debug.Assert(character != null && !character.Removed);
+                Debug.Assert(character is { Removed: false });
                 character.Update(deltaTime, cam);
             }
 
@@ -3421,8 +3442,7 @@ namespace Barotrauma
                 foreach (Item item in Inventory.GetAllItems(checkForDuplicates: false))
                 {
                     if (item.body == null || item.body.Enabled) { continue; }
-                    item.SetTransform(SimPosition, 0.0f);
-                    item.Submarine = Submarine;
+                    item.SetTransform(SimPosition, 0.0f, forceSubmarine: Submarine);
                 }
             }
 
@@ -4571,7 +4591,10 @@ namespace Barotrauma
 
             SetStun(stun);
 
-            if (attacker != null && attacker != this && GameMain.NetworkMember != null && !GameMain.NetworkMember.ServerSettings.AllowFriendlyFire)
+            if (attacker != null && attacker != this && 
+                attacker.IsOnPlayerTeam &&
+                GameMain.NetworkMember != null && 
+                !GameMain.NetworkMember.ServerSettings.AllowFriendlyFire)
             {
                 if (attacker.TeamID == TeamID) 
                 {
@@ -5714,7 +5737,7 @@ namespace Barotrauma
 
         public bool HasRecipeForItem(Identifier recipeIdentifier)
         {
-            if (GameMain.GameSession != null && GameMain.GameSession.UnlockedRecipes.Contains(recipeIdentifier)) { return true; }
+            if (GameMain.GameSession != null && GameMain.GameSession.HasUnlockedRecipe(this, recipeIdentifier)) { return true; }
             return characterTalents.Any(t => t.UnlockedRecipes.Contains(recipeIdentifier));
         }
 

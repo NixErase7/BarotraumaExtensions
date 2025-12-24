@@ -11,7 +11,6 @@ using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Xml.Linq;
-using Barotrauma.PerkBehaviors;
 
 namespace Barotrauma.Networking
 {
@@ -26,6 +25,8 @@ namespace Barotrauma.Networking
         
 #if DEBUG
         public float DebugServerVoipAmplitude;
+
+        public static bool MultiClientTestMode;
 #endif
 
         public override Voting Voting { get; }
@@ -561,6 +562,11 @@ namespace Barotrauma.Networking
                 {
                     SendLobbyUpdate();
                 }
+                if (Timing.TotalTime > LastMissingCampaignSubRequestTime)
+                {
+                    TryRequestMissingCampaignSubs();
+                    LastMissingCampaignSubRequestTime = Timing.TotalTime + MissingCampaignSubRequestInterval;
+                }
             }
 
             if (ServerSettings.VoiceChatEnabled)
@@ -873,8 +879,9 @@ namespace Barotrauma.Networking
                     ReadAchievement(inc);
                     break;
                 case ServerPacketHeader.UNLOCKRECIPE:
+                    CharacterTeamType team = (CharacterTeamType)inc.ReadByte();
                     Identifier identifier = inc.ReadIdentifier();
-                    GameMain.GameSession.UnlockRecipe(identifier, showNotifications: true);
+                    GameMain.GameSession?.UnlockRecipe(team, identifier, showNotifications: true);
                     break;
                 case ServerPacketHeader.ACHIEVEMENT_STAT:
                     ReadAchievementStat(inc);
@@ -2280,13 +2287,7 @@ namespace Barotrauma.Networking
                                     if (GameMain.Client.IsServerOwner) { RequestSelectMode(modeIndex); }
                                 }
 
-                                if (GameMain.NetLobbyScreen.SelectedMode == GameModePreset.MultiPlayerCampaign)
-                                {
-                                    foreach (SubmarineInfo sub in ServerSubmarines.Where(s => !ServerSettings.HiddenSubs.Contains(s.Name)))
-                                    {
-                                        GameMain.NetLobbyScreen.CheckIfCampaignSubMatches(sub, NetLobbyScreen.SubmarineDeliveryData.Campaign);
-                                    }
-                                }
+                                TryRequestMissingCampaignSubs();
 
                                 GameMain.NetLobbyScreen.SetAllowSpectating(allowSpectating);
                                 GameMain.NetLobbyScreen.SetAllowAFK(allowAFK);
@@ -2640,6 +2641,21 @@ namespace Barotrauma.Networking
             msg.WriteUInt16(bot.ID);
             msg.WriteBoolean(pendingHire);
             ClientPeer?.Send(msg, DeliveryMethod.Reliable);
+        }
+
+        private double LastMissingCampaignSubRequestTime;
+
+        const double MissingCampaignSubRequestInterval = 10.0f;
+
+        private void TryRequestMissingCampaignSubs()
+        {
+            if (GameMain.NetLobbyScreen.SelectedMode == GameModePreset.MultiPlayerCampaign)
+            {
+                foreach (SubmarineInfo sub in ServerSubmarines.Where(s => !ServerSettings.HiddenSubs.Contains(s.Name)))
+                {
+                    GameMain.NetLobbyScreen.CheckIfCampaignSubMatches(sub, NetLobbyScreen.SubmarineDeliveryData.Campaign);
+                }
+            }
         }
 
         public void RequestFile(FileTransferType fileType, string file, string fileHash)
@@ -3809,9 +3825,15 @@ namespace Barotrauma.Networking
                     outMsg.WriteUInt16(eventId);
                     outMsg.WriteUInt16(entityId);
                     outMsg.WriteByte((byte)Submarine.Loaded.Count);
-                    foreach (Submarine sub in Submarine.Loaded)
+                    //server has restrictions on the length and number of subs listed in the error (see GameServer.HandleClientError),
+                    //let's adhere to those
+                    foreach (Submarine sub in Submarine.Loaded.Take(5))
                     {
-                        outMsg.WriteString(sub.Info.Name);
+                        string subNameTruncated = 
+                            sub.Info.Name.Length > MaxSubNameLengthInErrorMessages ? 
+                                sub.Info.Name.Substring(0, MaxSubNameLengthInErrorMessages) : 
+                                sub.Info.Name;
+                        outMsg.WriteString(subNameTruncated);
                     }
                     break;
             }

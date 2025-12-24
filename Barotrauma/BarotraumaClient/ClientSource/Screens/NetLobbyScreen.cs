@@ -2107,7 +2107,10 @@ namespace Barotrauma
             };
 
             serverLogReverseButton = new GUIButton(new RectTransform(new Vector2(1.0f, 0.05f), serverLogListboxLayout.RectTransform), style: "UIToggleButtonVertical");
-            serverLogBox = new GUIListBox(new RectTransform(new Vector2(1.0f, 0.95f), serverLogListboxLayout.RectTransform));
+            serverLogBox = new GUIListBox(new RectTransform(new Vector2(1.0f, 0.95f), serverLogListboxLayout.RectTransform))
+            {
+                AutoHideScrollBar = false
+            };
 
             //filter tickbox list ------------------------------------------------------------------
 
@@ -2215,7 +2218,7 @@ namespace Barotrauma
                 OnClicked = (btn, obj) =>
                 {
                     if (GameMain.Client == null) { return true; }
-                    GUI.CreateVerificationPrompt(GameMain.GameSession.GameMode is CampaignMode ? "PauseMenuReturnToServerLobbyVerification" : "EndRoundSubNotAtLevelEnd",
+                    GUI.CreateVerificationPrompt(GameMain.GameSession?.GameMode is CampaignMode ? "PauseMenuReturnToServerLobbyVerification" : "EndRoundSubNotAtLevelEnd",
                         () =>
                         {
                             GameMain.Client?.RequestEndRound(save: false);
@@ -2235,11 +2238,7 @@ namespace Barotrauma
                     if (GameMain.Client == null) { return true; }
 
                     //the player presumably no longer wants to be afk if they clicked the start button
-                    if (afkBox.Selected)
-                    {
-                        afkBox.Flash(GUIStyle.Green);
-                    }
-                    afkBox.Selected = false;
+                    SetAFKSelected(false);
 
                     if (CampaignSetupFrame.Visible && CampaignSetupUI != null)
                     {
@@ -2371,7 +2370,7 @@ namespace Barotrauma
 
             if (GameMain.Client != null)
             {
-                afkBox.Visible = !GameMain.Client.IsServerOwner && GameMain.Client.ServerSettings.AllowAFK;
+                afkBox.Visible = GameMain.Client.IsServerOwner || GameMain.Client.ServerSettings.AllowAFK;
                 GameMain.Client.Voting.ResetVotes(GameMain.Client.ConnectedClients);
                 joinOnGoingRoundButton.OnClicked = (btn, userdata) =>
                 {
@@ -3096,6 +3095,15 @@ namespace Barotrauma
             }
         }
 
+        public void SetAFKSelected(bool selected)
+        {
+            if (afkBox.Selected != selected)
+            {
+                afkBox.Flash(GUIStyle.Green);
+                afkBox.Selected = selected;
+            }
+        }
+
         public void SetAutoRestart(bool enabled, float timer = 0.0f)
         {
             autoRestartBox.Selected = enabled;
@@ -3321,11 +3329,17 @@ namespace Barotrauma
             VoteType voteType;
             if (component.Parent == GameMain.NetLobbyScreen.SubList.Content)
             {
-                if (SelectedMode == GameModePreset.PvP && MultiplayerPreferences.Instance.TeamPreference is not (CharacterTeamType.Team1 or CharacterTeamType.Team2))
+                if (SelectedMode == GameModePreset.PvP && 
+                    MultiplayerPreferences.Instance.TeamPreference is not (CharacterTeamType.Team1 or CharacterTeamType.Team2))
                 {
+                    if (TeamPreferenceListBox == null)
+                    {
+                        //refresh player frame to ensure we create the team preference list box
+                        UpdatePlayerFrame(characterInfo: GameMain.Client?.CharacterInfo);
+                    }
+
                     // we are in PvP but don't have a team selected, so we can't select a sub
                     // and also highlight the team selection list
-
                     foreach (GUIComponent child in TeamPreferenceListBox.Content.Children)
                     {
                         if (child.UserData is CharacterTeamType.None) { continue; }
@@ -5002,7 +5016,7 @@ namespace Barotrauma
                 };
 
                 micIcon = new GUIImage(new RectTransform(new Vector2(0.05f, 1.0f), chatRow.RectTransform), style: "GUIMicrophoneUnavailable");
-                chatInput.Select();
+                chatInput.Select(ignoreSelectSound: true);
             }
 
             //this needs to be done even if we're using the existing chatinput instance instead of creating a new one,

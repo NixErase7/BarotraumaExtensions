@@ -14,14 +14,41 @@ namespace Barotrauma
         public enum SpawnLocationType
         {
             Any,
+            /// <summary>
+            /// Spawnpoint inside the main submarine.
+            /// </summary>
             MainSub,
+            /// <summary>
+            /// Spawnpoint inside an outpost.
+            /// </summary>
             Outpost,
+            /// <summary>
+            /// Spawnpoint on the main path through the level.
+            /// </summary>
             MainPath,
+            /// <summary>
+            /// Spawnpoint in a cave. Only valid if there are caves in the level.
+            /// </summary>
             Cave,
+            /// <summary>
+            /// Spawnpoint in an abyss cave. Only valid if there are abyss caves in the level.
+            /// </summary>
             AbyssCave,
+            /// <summary>
+            /// Spawnpoint in a ruin. Only valid if there are ruins in the level.
+            /// </summary>
             Ruin,
+            /// <summary>
+            /// Spawnpoint in a wreck. Only valid if there are wrecks in the level.
+            /// </summary>
             Wreck,
+            /// <summary>
+            /// Spawnpoint in a beacon station. Only valid if there are beacon stations in the level.
+            /// </summary>
             BeaconStation,
+            /// <summary>
+            /// A spawnpoint on the main path through the level. The difference to the <see cref="MainPath"/> type is that the closest possible spawnpoint is chosen.
+            /// </summary>
             NearMainSub
         }
 
@@ -410,16 +437,39 @@ namespace Barotrauma
         public static WayPoint GetSpawnPos(SpawnLocationType spawnLocation, SpawnType? spawnPointType, IEnumerable<Identifier> moduleFlags = null, IEnumerable<Identifier> spawnpointTags = null, bool asFarAsPossibleFromAirlock = false, bool requireTaggedSpawnPoint = false, bool allowInPlayerView = true)
         {
             bool requireHull = spawnLocation == SpawnLocationType.MainSub || spawnLocation == SpawnLocationType.Outpost;
-            List<WayPoint> potentialSpawnPoints = WayPoint.WayPointList.FindAll(wp => IsValidSubmarineType(spawnLocation, wp.Submarine) && (wp.CurrentHull != null || !requireHull));           
-            potentialSpawnPoints = potentialSpawnPoints.FindAll(wp => wp.ConnectedDoor == null && wp.Ladders == null && wp.IsTraversable);
+
+            IEnumerable<WayPoint> potentialSpawnPoints = WayPoint.WayPointList.FindAll(wp => IsValidSubmarineType(spawnLocation, wp.Submarine) && (wp.CurrentHull != null || !requireHull));           
+            potentialSpawnPoints = potentialSpawnPoints.Where(wp => wp.ConnectedDoor == null && wp.Ladders == null && wp.IsTraversable);
+
+            //find spawnpoints with the desired type, or any random spawnpoints if not specified
+            IEnumerable<WayPoint> spawnPointsWithCorrectType;
+            if (spawnPointType.HasValue)
+            {
+                spawnPointsWithCorrectType = potentialSpawnPoints.Where(wp =>
+                    spawnPointType.Value.HasFlag(wp.SpawnType) &&
+                    //need to handle zero (SpawnType.Path) separately, because spawnPointType will always have the flag 0
+                    (wp.SpawnType != 0 || spawnPointType.Value == 0));
+            }
+            else
+            {
+                spawnPointsWithCorrectType = potentialSpawnPoints;
+            }
+            if (spawnPointsWithCorrectType.Any())
+            {
+                potentialSpawnPoints = spawnPointsWithCorrectType;
+            }
+
+            //with correct module flags, if there are any
             if (moduleFlags != null && moduleFlags.Any())
             {
-                var spawnPoints = potentialSpawnPoints.Where(wp => wp.CurrentHull is Hull h && h.OutpostModuleTags.Any(moduleFlags.Contains));
-                if (spawnPoints.Any())
+                var spawnPointsWithCorrectFlags = potentialSpawnPoints.Where(wp => wp.CurrentHull is Hull h && h.OutpostModuleTags.Any(moduleFlags.Contains));
+                if (spawnPointsWithCorrectFlags.Any())
                 {
-                    potentialSpawnPoints = spawnPoints.ToList();
+                    potentialSpawnPoints = spawnPointsWithCorrectFlags.ToList();
                 }
             }
+
+            //with correct spawn point tags, if there are any
             if (spawnpointTags != null && spawnpointTags.Any())
             {
                 var spawnPointsWithTag = potentialSpawnPoints.Where(wp => spawnpointTags.Any(tag => wp.Tags.Contains(tag) && wp.ConnectedDoor == null && wp.IsTraversable));
@@ -461,16 +511,13 @@ namespace Barotrauma
                 return null;
             }
 
-            IEnumerable<WayPoint> validSpawnPoints;
-            if (spawnPointType.HasValue)
-            {
-                validSpawnPoints = potentialSpawnPoints.FindAll(wp => spawnPointType.Value.HasFlag(wp.SpawnType));
-            }
-            else
-            {
-                validSpawnPoints = potentialSpawnPoints.FindAll(wp => wp.SpawnType != SpawnType.Path);
-                if (!validSpawnPoints.Any()) { validSpawnPoints = potentialSpawnPoints; }
-            }
+            //spawnpoints that match the desired criteria found, choose the best one next
+            //  preferring non-path spawnpoints if there's any available
+            var nonPathSpawnPoints = potentialSpawnPoints.Where(wp => wp.SpawnType != SpawnType.Path);
+            var validSpawnPoints =
+                nonPathSpawnPoints.Any() && spawnPointType != SpawnType.Path ?
+                nonPathSpawnPoints :
+                potentialSpawnPoints;
 
             //don't spawn in an airlock module if there are other options
             var airlockSpawnPoints = potentialSpawnPoints.Where(wp => wp.CurrentHull?.OutpostModuleTags.Contains("airlock".ToIdentifier()) ?? false);

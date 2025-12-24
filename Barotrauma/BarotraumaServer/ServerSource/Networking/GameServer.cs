@@ -1052,52 +1052,75 @@ namespace Barotrauma.Networking
             string errorStr = "Unhandled error report";
             string errorStrNoName = errorStr;
 
-            ClientNetError error = (ClientNetError)inc.ReadByte();
-            switch (error)
+            bool malformedData = false;
+            try
             {
-                case ClientNetError.MISSING_EVENT:
-                    UInt16 expectedID = inc.ReadUInt16();
-                    UInt16 receivedID = inc.ReadUInt16();
-                    errorStr = errorStrNoName = "Expecting event id " + expectedID.ToString() + ", received " + receivedID.ToString();
-                    break;
-                case ClientNetError.MISSING_ENTITY:
-                    UInt16 eventID = inc.ReadUInt16();
-                    UInt16 entityID = inc.ReadUInt16();
-                    byte subCount = inc.ReadByte();
-                    List<string> subNames = new List<string>();
-                    for (int i = 0; i < subCount; i++)
-                    {
-                        subNames.Add(inc.ReadString());
-                    }
-                    Entity entity = Entity.FindEntityByID(entityID);
-                    if (entity == null)
-                    {
-                        errorStr = errorStrNoName = "Received an update for an entity that doesn't exist (event id " + eventID.ToString() + ", entity id " + entityID.ToString() + ").";
-                    }
-                    else if (entity is Character character)
-                    {
-                        errorStr = $"Missing character {character.Name} (event id {eventID}, entity id {entityID}).";
-                        errorStrNoName = $"Missing character {character.SpeciesName}  (event id {eventID}, entity id {entityID}).";
-                    }
-                    else if (entity is Item item)
-                    {
-                        errorStr = errorStrNoName = $"Missing item {item.Name}, sub: {item.Submarine?.Info?.Name ?? "none"} (event id {eventID}, entity id {entityID}).";
-                    }
-                    else
-                    {
-                        errorStr = errorStrNoName = $"Missing entity {entity}, sub: {entity.Submarine?.Info?.Name ?? "none"} (event id {eventID}, entity id {entityID}).";
-                    }
-                    if (GameStarted)
-                    {
-                        var serverSubNames = Submarine.Loaded.Select(s => s.Info.Name);
-                        if (subCount != Submarine.Loaded.Count || !subNames.SequenceEqual(serverSubNames))
+                ClientNetError error = (ClientNetError)inc.ReadByte();
+                switch (error)
+                {
+                    case ClientNetError.MISSING_EVENT:
+                        UInt16 expectedID = inc.ReadUInt16();
+                        UInt16 receivedID = inc.ReadUInt16();
+                        errorStr = errorStrNoName = "Expecting event id " + expectedID.ToString() + ", received " + receivedID.ToString();
+                        break;
+                    case ClientNetError.MISSING_ENTITY:
+                        UInt16 eventID = inc.ReadUInt16();
+                        UInt16 entityID = inc.ReadUInt16();
+                        int subCount = inc.ReadByte();
+                        List<string> subNames = new List<string>();
+                        for (int i = 0; i < Math.Min(subCount, 5); i++)
                         {
-                            string subErrorStr =  $" Loaded submarines don't match (client: {string.Join(", ", subNames)}, server: {string.Join(", ", serverSubNames)}).";
-                            errorStr += subErrorStr;
-                            errorStrNoName += subErrorStr;
+                            string subName = inc.ReadString();
+                            if (subName == null || subName.Length > MaxSubNameLengthInErrorMessages)
+                            {
+                                malformedData = true;
+                            }
+                            else
+                            {
+                                subNames.Add(subName);
+                            }
                         }
-                    }
-                    break;
+                        Entity entity = Entity.FindEntityByID(entityID);
+                        if (entity == null)
+                        {
+                            errorStr = errorStrNoName = "Received an update for an entity that doesn't exist (event id " + eventID.ToString() + ", entity id " + entityID.ToString() + ").";
+                        }
+                        else if (entity is Character character)
+                        {
+                            errorStr = $"Missing character {character.Name} (event id {eventID}, entity id {entityID}).";
+                            errorStrNoName = $"Missing character {character.SpeciesName}  (event id {eventID}, entity id {entityID}).";
+                        }
+                        else if (entity is Item item)
+                        {
+                            errorStr = errorStrNoName = $"Missing item {item.Name} ({item.Prefab.Identifier}), sub: {item.Submarine?.Info?.Name ?? "none"} (event id {eventID}, entity id {entityID}).";
+                        }
+                        else
+                        {
+                            errorStr = errorStrNoName = $"Missing entity {entity}, sub: {entity.Submarine?.Info?.Name ?? "none"} (event id {eventID}, entity id {entityID}).";
+                        }
+                        if (GameStarted)
+                        {
+                            var serverSubNames = Submarine.Loaded.Select(s => 
+                                s.Info.Name.Length > MaxSubNameLengthInErrorMessages ? s.Info.Name.Substring(0, MaxSubNameLengthInErrorMessages) : s.Info.Name);
+                            if (subCount != Submarine.Loaded.Count || !subNames.SequenceEqual(serverSubNames))
+                            {
+                                string subErrorStr =  $" Loaded submarines don't match (client: {string.Join(", ", subNames)}, server: {string.Join(", ", serverSubNames)}).";
+                                errorStr += subErrorStr;
+                                errorStrNoName += subErrorStr;
+                            }
+                        }
+                        break;
+                }
+            }
+            catch (Exception e)
+            {
+                DebugConsole.ThrowError($"Failed to read error data from the client {ClientLogName(c)}.", e);
+                malformedData = true;
+            }
+            if (malformedData)
+            {
+                KickClient(c, "Received malformed error data.");
+                return;
             }
 
             Log(ClientLogName(c) + " has reported an error: " + errorStr, ServerLog.MessageType.Error);
@@ -1121,7 +1144,6 @@ namespace Barotrauma.Networking
             {
                 KickClient(c, errorStr);
             }
-
         }
 
         private void WriteEventErrorData(Client client, string errorStr)
@@ -1823,6 +1845,9 @@ namespace Barotrauma.Networking
                     }
                     else
                     {
+                        //client presumably isn't afk if they clicked to start a round
+                        sender.AFK = false;
+
                         bool continueCampaign = inc.ReadBoolean();
                         if (mpCampaign != null && mpCampaign.GameOver || continueCampaign)
                         {
@@ -2008,7 +2033,8 @@ namespace Barotrauma.Networking
                     }
                 }
 
-                if (!FileSender.ActiveTransfers.Any(t => t.Connection == c.Connection && t.FileType == FileTransferType.CampaignSave))
+                //don't send the campaign save if there's any other transfers running (client waiting for subs, mods, or already transferring the campaign save)
+                if (FileSender.ActiveTransfers.None(t => t.Connection == c.Connection))
                 {
                     FileSender.StartTransfer(c.Connection, FileTransferType.CampaignSave, GameMain.GameSession.DataPath.SavePath);
                     c.LastCampaignSaveSendTime = (campaign.LastSaveID, (float)NetTime.Now);
@@ -3035,7 +3061,7 @@ namespace Barotrauma.Networking
                     WayPoint jobItemSpawnPoint = mainSubWaypoints != null ? mainSubWaypoints[i] : spawnWaypoints[i];
 
                     Character spawnedCharacter = Character.Create(teamClients[i].CharacterInfo, spawnWaypoints[i].WorldPosition, teamClients[i].CharacterInfo.Name, isRemotePlayer: true, hasAi: false);
-                    spawnedCharacter.AnimController.Frozen = true;
+                    //spawnedCharacter.AnimController.Frozen = true;
                     spawnedCharacter.TeamID = teamID;
                     teamClients[i].Character = spawnedCharacter;
                     var characterData = campaign?.GetClientCharacterData(teamClients[i]);
@@ -3716,7 +3742,7 @@ namespace Barotrauma.Networking
 
             UpdateVoteStatus();
 
-            SendChatMessage(peerDisconnectPacket.ChatMessage(client).Value, ChatMessageType.Server, changeType: peerDisconnectPacket.ConnectionChangeType);
+            SendChatMessage(peerDisconnectPacket.ChatMessage(client.Name).Value, ChatMessageType.Server, changeType: peerDisconnectPacket.ConnectionChangeType);
 
             UpdateCrewFrame();
 
@@ -4234,13 +4260,14 @@ namespace Barotrauma.Networking
             serverPeer.Send(msg, client.Connection, DeliveryMethod.Reliable);
         }
 
-        public void UnlockRecipe(Identifier identifier)
+        public void UnlockRecipe(CharacterTeamType team, Identifier identifier)
         {
+            IWriteMessage msg = new WriteOnlyMessage();
+            msg.WriteByte((byte)ServerPacketHeader.UNLOCKRECIPE);            
+            msg.WriteByte((byte)team);
+            msg.WriteIdentifier(identifier);
             foreach (var client in connectedClients)
             {
-                IWriteMessage msg = new WriteOnlyMessage();
-                msg.WriteByte((byte)ServerPacketHeader.UNLOCKRECIPE);
-                msg.WriteIdentifier(identifier);
                 serverPeer.Send(msg, client.Connection, DeliveryMethod.Reliable);
             }
         }
@@ -4279,7 +4306,7 @@ namespace Barotrauma.Networking
 
         public void SetClientCharacter(Client client, Character newCharacter)
         {
-            if (client == null) return;
+            if (client == null) { return; }
 
             //the client's previous character is no longer a remote player
             if (client.Character != null)
@@ -4305,13 +4332,14 @@ namespace Barotrauma.Networking
                     newCharacter.LastNetworkUpdateID = client.Character.LastNetworkUpdateID;
                 }
 
-                if (newCharacter.Info != null && newCharacter.Info.Character == null)
+                if (newCharacter.Info is { Character: null })
                 {
                     newCharacter.Info.Character = newCharacter;
                 }
 
                 newCharacter.SetOwnerClient(client);
                 newCharacter.Enabled = true;
+                newCharacter.AnimController.Frozen = false;
                 client.Character = newCharacter;
                 client.CharacterInfo = newCharacter.Info;
                 CreateEntityEvent(newCharacter, new Character.ControlEventData(client));
@@ -4383,9 +4411,22 @@ namespace Barotrauma.Networking
                 moustacheIndex: netInfo.MoustacheIndex,
                 faceAttachmentIndex: netInfo.FaceAttachmentIndex);
 
-            sender.CharacterInfo.Head.SkinColor = netInfo.SkinColor;
-            sender.CharacterInfo.Head.HairColor = netInfo.HairColor;
-            sender.CharacterInfo.Head.FacialHairColor = netInfo.FacialHairColor;
+            sender.CharacterInfo.Head.SkinColor = validateColor(netInfo.SkinColor, "skin color", sender.CharacterInfo.SkinColors.Select(kvp => kvp.Color));
+            sender.CharacterInfo.Head.HairColor = validateColor(netInfo.HairColor, "hair color", sender.CharacterInfo.HairColors.Select(kvp => kvp.Color));
+            sender.CharacterInfo.Head.FacialHairColor = validateColor(netInfo.FacialHairColor, "facial hair color", sender.CharacterInfo.FacialHairColors.Select(kvp => kvp.Color));
+
+            Color validateColor(Color newColor, string colorName, IEnumerable<Color> supportedColors)
+            {
+                if (!supportedColors.Contains(newColor))
+                {
+                    DebugConsole.AddWarning($"Client {sender.Name} attempted to set their {colorName} to an unsupported value ({newColor}).");
+                    return supportedColors.First();
+                }
+                else
+                {
+                    return newColor;
+                }
+            }
 
             if (netInfo.JobVariants.Length > 0)
             {

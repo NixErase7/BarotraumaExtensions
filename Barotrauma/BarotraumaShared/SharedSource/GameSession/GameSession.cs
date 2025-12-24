@@ -170,8 +170,8 @@ namespace Barotrauma
 
         public Submarine? Submarine { get; set; }
 
-        private readonly HashSet<Identifier> unlockedRecipes = new HashSet<Identifier>();
-        public IEnumerable<Identifier> UnlockedRecipes => unlockedRecipes;
+        private readonly HashSet<(CharacterTeamType team, Identifier identifier)> unlockedRecipes = new HashSet<(CharacterTeamType, Identifier)>();
+        public IEnumerable<(CharacterTeamType, Identifier)> UnlockedRecipes => unlockedRecipes;
 
         public CampaignDataPath DataPath { get; set; }
 
@@ -741,7 +741,7 @@ namespace Barotrauma
                     var missionsToShow = missions.Where(m => m.Prefab.ShowStartMessage);
                     if (missionsToShow.Count() > 1)
                     {
-                        string joinedMissionNames = string.Join(", ", missions.Select(m => m.Name));
+                        string joinedMissionNames = string.Join(", ", missions.Where(static m => m.Prefab.ShowInMenus).Select(static m => m.Name));
                         GUI.AddMessage(TextManager.AddPunctuation(':', TextManager.Get("Mission"), joinedMissionNames), Color.CadetBlue, playSound: false);
                     }
                     else
@@ -1499,23 +1499,30 @@ namespace Barotrauma
 #endif
         }
 
-        public void UnlockRecipe(Identifier identifier, bool showNotifications)
+        public void UnlockRecipe(CharacterTeamType team, Identifier identifier, bool showNotifications)
         {
-            if (unlockedRecipes.Add(identifier))
+            if (unlockedRecipes.Add((team, identifier)))
             {
 #if CLIENT
                 if (showNotifications)
                 {
                     foreach (var character in GetSessionCrewCharacters(CharacterType.Both))
                     {
+                        if (character.TeamID != team) { continue; }
                         LocalizedString recipeName = TextManager.Get($"entityname.{identifier}").Fallback(identifier.Value);
                         character.AddMessage(TextManager.GetWithVariable("recipeunlockednotification", "[name]", recipeName).Value, GUIStyle.Yellow, playSound: true);
                     }
                 }
 #else
-                GameMain.Server.UnlockRecipe(identifier);
+                GameMain.Server.UnlockRecipe(team, identifier);
 #endif
             }
+        }
+
+        public bool HasUnlockedRecipe(Character character, Identifier itemIdentifier)
+        {
+            if (character == null) { return false; }
+            return unlockedRecipes.Contains((character.TeamID, itemIdentifier));
         }
 
         public static bool IsCompatibleWithEnabledContentPackages(IList<string> contentPackageNames, out LocalizedString errorMsg)

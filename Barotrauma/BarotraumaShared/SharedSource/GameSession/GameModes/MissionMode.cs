@@ -32,24 +32,22 @@ namespace Barotrauma
             : base(preset)
         {
             Location[] locations = { GameMain.GameSession.StartLocation, GameMain.GameSession.EndLocation };
-            if (preset.Identifier == "mission".ToIdentifier())
+            float difficulty = GameMain.NetworkMember.ServerSettings.SelectedLevelDifficulty;
+            var mission = Mission.LoadRandom(locations, seed, requireCorrectLocationType: false, missionTypes, difficultyLevel: difficulty);
+            if (mission == null)
             {
-                for (int i = 0; i < GameMain.NetworkMember.ServerSettings.MissionCount; i++)
-                {
-                    var mission = Mission.LoadRandom(locations, seed + i, requireCorrectLocationType: false, missionTypes, difficultyLevel: GameMain.NetworkMember.ServerSettings.SelectedLevelDifficulty);
-                    if (mission != null)
-                    {
-                        missions.Add(mission);
-                    }
-                }
+                DebugConsole.AddWarning(
+                    $"Could not find any missions matching the mission types {string.Join(", ", missionTypes.Select(m => m.Value))} " +
+                    $"and the difficulty {difficulty}. Ignoring the difficulty requirement...");
+                mission = Mission.LoadRandom(locations, seed, requireCorrectLocationType: false, missionTypes);
+            }
+            if (mission != null)
+            {
+                missions.Add(mission);
             }
             else
             {
-                var mission = Mission.LoadRandom(locations, seed, requireCorrectLocationType: false, missionTypes, difficultyLevel: GameMain.NetworkMember.ServerSettings.SelectedLevelDifficulty);
-                if (mission != null)
-                {
-                    missions.Add(mission);
-                }
+                DebugConsole.AddWarning($"Could not find any missions matching the mission types {string.Join(", ", missionTypes.Select(m => m.Value))}.");
             }
         }
 
