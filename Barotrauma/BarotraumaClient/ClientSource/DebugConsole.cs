@@ -246,6 +246,7 @@ namespace Barotrauma
                 case "dumptofile":
                 case "findentityids":
                 case "setfreecamspeed":
+                case "setfreecamminzoom":
                 case "togglevoicechatfilters":
                 case "bindkey":
                 case "savebinds":
@@ -2513,6 +2514,15 @@ namespace Barotrauma
                 { 
                     float.TryParse(args[0], NumberStyles.Number, CultureInfo.InvariantCulture, out float speed);
                     Screen.Selected.Cam.FreeCamMoveSpeed = speed;
+                }
+            }));
+
+            commands.Add(new Command("setfreecamminzoom", "setfreecamminzoom [zoom]: Set the camera min zoom. Defaults to 0.1.", (string[] args) =>
+            {
+                if (args.Length > 0)
+                {
+                    float.TryParse(args[0], NumberStyles.Number, CultureInfo.InvariantCulture, out float minZoom);
+                    Screen.Selected.Cam.MinZoom = minZoom;
                 }
             }));
 

@@ -289,7 +289,8 @@ namespace Barotrauma
                 server.ConnectedClients.Contains(client) && 
                 client.Character != null && 
                 !client.Character.IsIncapacitated && !client.Character.Removed &&
-                activeEvents.None(e => e.Traitor == client);
+                activeEvents.None(e => e.Traitor == client) &&
+                client.Character.IsHuman;
         }
 
         private float GetTraitorEventPrefabCommonness(TraitorEventPrefab prefab)

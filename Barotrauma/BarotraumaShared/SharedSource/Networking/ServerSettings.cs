@@ -586,7 +586,14 @@ namespace Barotrauma.Networking
             get;
             private set;
         }
-        
+
+        [Serialize(1, IsPropertySaveable.Yes)]
+        public int MissionCount
+        {
+            get;
+            private set;
+        }
+
         [Serialize("Random", IsPropertySaveable.Yes)]
         public Identifier Biome
         {

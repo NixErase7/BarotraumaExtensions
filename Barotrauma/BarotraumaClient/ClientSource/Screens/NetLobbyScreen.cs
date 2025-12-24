@@ -964,6 +964,23 @@ namespace Barotrauma
 
             campaignHiddenElements.Add(outpostHolder);
 
+            // mission count -----------------------------------------------------------------------------
+            var missionCountHolder = new GUILayoutGroup(new RectTransform(new Vector2(1.0f, 0.1f), gameModeSettingsContent.RectTransform), isHorizontal: true, childAnchor: Anchor.CenterLeft) { Stretch = true };
+            new GUITextBlock(new RectTransform(new Vector2(0.7f, 0.0f), missionCountHolder.RectTransform), "Mission count", wrap: true); //Добавить локализацию текста
+            var missionCountSelection = new GUISelectionCarousel<int>(new RectTransform(new Vector2(0.5f, 1.0f), missionCountHolder.RectTransform));
+            for (int i = 1; i <= 5; i++)
+            {
+                missionCountSelection.AddElement(i, i.ToString());
+            }
+            AssignComponentToServerSetting(missionCountSelection, nameof(ServerSettings.MissionCount));
+            missionCountSelection.OnValueChanged += (_) => GameMain.Client?.ServerSettings.ClientAdminWrite(ServerSettings.NetFlags.Properties);
+
+            //Отключить отображение в pvp и sandbox
+            clientDisabledElements.Add(missionCountHolder);
+            clientDisabledElements.Add(missionCountSelection);
+            campaignHiddenElements.Add(missionCountHolder);
+            campaignHiddenElements.Add(missionCountSelection);
+
             // biome -----------------------------------------------------------------------------
             GUILayoutGroup biomeHolder = new GUILayoutGroup(new RectTransform(new Vector2(1.0f, 0.05f), gameModeSettingsContent.RectTransform), isHorizontal: true)
             {

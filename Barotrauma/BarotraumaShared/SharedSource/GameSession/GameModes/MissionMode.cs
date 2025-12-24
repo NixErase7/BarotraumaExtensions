@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Barotrauma.Networking;
+using Barotrauma;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -30,10 +32,24 @@ namespace Barotrauma
             : base(preset)
         {
             Location[] locations = { GameMain.GameSession.StartLocation, GameMain.GameSession.EndLocation };
-            var mission = Mission.LoadRandom(locations, seed, requireCorrectLocationType: false, missionTypes, difficultyLevel: GameMain.NetworkMember.ServerSettings.SelectedLevelDifficulty);
-            if (mission != null)
+            if (preset.Identifier == "mission".ToIdentifier())
             {
-                missions.Add(mission);
+                for (int i = 0; i < GameMain.NetworkMember.ServerSettings.MissionCount; i++)
+                {
+                    var mission = Mission.LoadRandom(locations, seed + i, requireCorrectLocationType: false, missionTypes, difficultyLevel: GameMain.NetworkMember.ServerSettings.SelectedLevelDifficulty);
+                    if (mission != null)
+                    {
+                        missions.Add(mission);
+                    }
+                }
+            }
+            else
+            {
+                var mission = Mission.LoadRandom(locations, seed, requireCorrectLocationType: false, missionTypes, difficultyLevel: GameMain.NetworkMember.ServerSettings.SelectedLevelDifficulty);
+                if (mission != null)
+                {
+                    missions.Add(mission);
+                }
             }
         }
 
@@ -54,7 +70,7 @@ namespace Barotrauma
         /// </summary>
         public static IEnumerable<Identifier> ValidateMissionTypes(IEnumerable<Identifier> missionTypes, Dictionary<Identifier, Type> missionClasses)
         {
-            return missionTypes.Where(type => 
+            return missionTypes.Where(type =>
                 MissionPrefab.Prefabs.OrderBy(missionPrefab => missionPrefab.UintIdentifier)
                     .Any(missionPrefab => missionPrefab.Type == type && missionClasses.ContainsValue(missionPrefab.MissionClass)));
         }
