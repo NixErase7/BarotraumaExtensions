@@ -1,6 +1,6 @@
 # Barotrauma
 
-Copyright © FakeFish Ltd 2017-2024
+Copyright © FakeFish Ltd 2017-2026
 
 Before downloading the source code, please read the [EULA](EULA.txt).
 
@@ -22,6 +22,6 @@ If you're interested in working on the code, either to develop mods or to contri
 ### Windows
 - [Visual Studio](https://www.visualstudio.com/vs/community/) with C# 10 support (VS 2022 or later recommended)
 ### Linux
-- [.NET 6 SDK](https://docs.microsoft.com/en-us/dotnet/core/install/linux)
+- [.NET 8 SDK](https://docs.microsoft.com/en-us/dotnet/core/install/linux)
 ### macOS
 - [Visual Studio 2022 for Mac](https://visualstudio.microsoft.com/vs/mac/)

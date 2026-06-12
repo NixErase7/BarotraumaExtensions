@@ -60,6 +60,7 @@ namespace Barotrauma
         {
             foreach (MissionPrefab missionPrefab in missionPrefabs)
             {
+                if (missionPrefab.CampaignOnly) { continue; }
                 if (!missionClasses.ContainsValue(missionPrefab.MissionClass))
                 {
                     throw new InvalidOperationException($"Cannot start gamemode with a {missionPrefab.MissionClass} mission.");
@@ -75,7 +76,7 @@ namespace Barotrauma
         {
             return missionTypes.Where(type =>
                 MissionPrefab.Prefabs.OrderBy(missionPrefab => missionPrefab.UintIdentifier)
-                    .Any(missionPrefab => missionPrefab.Type == type && missionClasses.ContainsValue(missionPrefab.MissionClass)));
+                    .Any(missionPrefab => missionPrefab.Type == type && !missionPrefab.CampaignOnly && missionClasses.ContainsValue(missionPrefab.MissionClass)));
         }
     }
 }
