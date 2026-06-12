@@ -310,6 +310,15 @@ namespace Barotrauma
                 };
             }, isCheat: true));
 
+            commands.Add(new Command("spawnsub", "spawnsub [Sub name]: Spawn a sub at cursor.", null,
+            () =>
+            {
+                return new string[][]
+                {
+                    SubmarineInfo.SavedSubmarines.Select(s => s.Name).ToArray()
+                };
+            }, isCheat: true));
+
             commands.Add(new Command("spawnitem", "spawnitem [itemname/itemidentifier] [cursor/inventory/cargo/random/[name]] [amount] [condition]: Spawn an item at the position of the cursor, in the inventory of the controlled character, in the inventory of the client with the given name, or at a random spawnpoint if the location parameter is omitted or \"random\".",
             (string[] args) =>
             {

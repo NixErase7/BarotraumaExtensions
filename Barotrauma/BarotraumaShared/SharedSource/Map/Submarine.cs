@@ -61,7 +61,7 @@ namespace Barotrauma
 
         public static readonly Vector2 GridSize = new Vector2(16.0f, 16.0f);
 
-        public static readonly Submarine[] MainSubs = new Submarine[2];
+        public static readonly Submarine[] MainSubs = new Submarine[3];
 
         /// <summary>
         /// Note that this can be null in some situations, e.g. editors and missions that don't load a submarine.

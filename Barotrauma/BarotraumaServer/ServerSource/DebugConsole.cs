@@ -9,6 +9,7 @@ using System.Linq;
 using System.Text;
 using Barotrauma.Steam;
 using Barotrauma.Extensions;
+using System.Runtime.CompilerServices;
 
 namespace Barotrauma
 {
@@ -502,6 +503,30 @@ namespace Barotrauma
             AssignOnExecute("spawnnpc", args => SpawnCharacter(args, Vector2.Zero, true));
             AssignOnClientRequestExecute("spawn|spawncharacter", (Client client, Vector2 cursorPos, string[] args) => SpawnCharacter(args, cursorPos));
             AssignOnClientRequestExecute("spawnnpc", (Client client, Vector2 cursorPos, string[] args) => SpawnCharacter(args, cursorPos, true));
+
+            AssignOnExecute("spawnsub", (string[] args) =>
+            {
+                if (args.Length == 0)
+                {
+                    NewMessage("Usage: spawnsub [sub name or full path]", Color.White);
+                    return;
+                }
+                Submarine newSub;
+
+                SubmarineInfo subInfo = SubmarineInfo.SavedSubmarines.FirstOrDefault(i => i.Name == args[0]);
+
+                if (subInfo == null)
+                {
+                    ThrowError($"Submarine \"{args[0]}\" not found among saved submarines or as a file path.");
+                    return;
+                }
+
+                newSub = Submarine.Load(subInfo, false);
+                Entity.Spawner.AddEntityToRemoveQueue AddToSpawnQueue(new SpawnEntity(newSub), true, false);
+                newSub.SetPosition(position: Submarine.MainSub?.WorldPosition ?? Vector2.Zero);
+                Submarine.MainSubs[2] = newSub;
+
+            });
 
             AssignOnExecute("giveperm", (string[] args) =>
             {
@@ -2359,7 +2384,7 @@ namespace Barotrauma
                                 revokedCommands.Add(matchingCommand);
                             }
                         }
-                    }
+                    }                    
 
                     client.SetPermissions(client.Permissions, client.PermittedConsoleCommands.Except(revokedCommands).ToList());
                     if (client.PermittedConsoleCommands.Count == 0)
